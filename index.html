@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<style>
+    :root{
+        --bg: #f5f3ef;  --surface: #fff;
+    --border: rgba(0,0,0,0.09);  --muted: rgba(0,0,0,0.38);
+    --text: rgba(0,0,0,0.82);
+    --english: #4caf7d;
+    --nepali: #e85d5d;
+    }
+    .everything{
+        display:flex;
+        flex-direction: column;
+        align-items: center;
+        outline: 1px solid red;
+        gap:100 px;
+
+
+    }
+
+    .status-bar{
+        display:flex;
+        align-items:center;
+        gap:8px;
+        padding: 10px 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--muted);
+    }
+
+    .status-dot{
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #444;
+        transition: background 0.3s;
+
+    }
+
+
+    .status-dot.active{
+        background: #4caf7d;
+    }
+
+    .status-dot.error{
+        background: #e85d5d;
+    }
+
+    body{
+        background: #0d0f13;
+        color: #e2e8f0;
+        font-family: sans-serif;
+    }
+    .orb{
+        width:180px;
+        height:180px;
+        border-radius:50%;
+        border: 2px solid #444;
+        background: #1a1d24;
+    }
+    @keyframes orbDetect{
+        0% {transform: scale(1);}
+        30% {transform: scale(1.3);}
+        60% {transform: scale(0.8);}
+        100% {transform: scale(1);}
+    }
+    .orb.detected-ne{
+        background: var(--nepali);
+        animation: orbDetect 1s ease-out
+    }
+
+    .orb.detected-en{
+        background-color: var(--english);
+        animation: orbDetect 1s ease-out;
+    }
+
+    @keyframes ring1{
+        0%, 100% {transform: scale(1); opacity:1;}
+        50% {transform:scale(0.5); opacity:0.6;}
+    }
+
+    .orb.listening::before{
+        border-color: rgba(0,0,0,0.10);
+        animation: ring1 2.4s ease-in-out infinite;
+    }
+
+    .orb.listening::after{
+        border-color: rgba(0,0,0,0.05);
+        animation: ring1 2.4s ease-in-out infinite;
+    }
+
+</style>
+<html>
+    <body>
+        <div class="everything">
+            <header>
+                <h1>Shekhar</h1>
+                <p class="tagline">Bilingual wake word listener</p>
+            </header>
+            
+            <div class="StatusBar">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Click start listening</span>
+            </div>
+
+            <button id="startButton" onclick="toggleListening()">Start Listening</button>
+
+
+            <div id="orb" class="orb" onclick="toggleListening()"></div>
+
+            <canvas id="waveCanvas"></canvas>
+
+            <div id="detectionCard" class="detection-card">
+                <p> Say a wake phase</p>
+            </div>
+
+            <ul id="loglist"></ul>
+        </div>
+    </body>
+</html>
+
+<script>
+    let isListening = false;
+    let recog = null;
+
+    function normalize(text){
+        return text.toLowerCase().trim();
+    }
+
+    function exactness(text,keywords){
+        score =0;
+
+        text = normalize(text);
+        for(const key of keywords){
+            if(text.includes(key)){
+                score=1.0;
+                break;
+            }
+        }
+        return score;
+    }
+    function toggleListening(){
+        if (isListening){
+            stopListening();
+
+        }
+        else{
+            startListening();
+            
+        }
+    }
+
+    function stopListening(){
+        isListening = false;
+        if(recog){
+            recog.onend = null;
+            recog.stop();
+            recog = null;
+        }
+        updateStartButton(false)
+        setStatus('Click to start', 'idle');             // grey dot
+
+    }
+    async function startListening(){
+        recog = createRecogniser();
+        if(!recog) {setStatus('Browser not supported', 'error');}
+        recog.start();
+        isListening = true;
+        updateStartButton(true)
+        setStatus('Listening for Shekhar...', 'active');   // green dot
+
+    }
+
+    function compute_ema(old_score,new_score,alpha=0.6){
+        return old_score*(1-alpha) + new_score*alpha;
+    }
+
+    const el_status_dot='statusDot';
+    const el_status_text = 'statusText';
+
+    const css_status_dot_base = 'status-dot';
+    const css_status_dot_active = 'status-dot active';
+    const css_status_dot_error = 'status-dot error';
+
+    function setStatus(msg,type){
+        document.getElementById(el_status_text).textContent = msg;
+
+        const dot = document.getElementById(el_status_dot);
+        if(type == 'active') dot.className = css_status_dot_active;
+        else if(type =="error")  dot.className = css_status_dot_error;
+        else dot.className = css_status_dot_base;
+    }
+
+    function updateStartButton(isActive){
+        const dot2 = document.getElementById('startButton');
+        if(isActive){
+            dot2.textContent = "Stop Listening";
+        }
+        else{
+            dot2.textContent = "Start Listening";
+
+        }
+
+    }
+
+    const ORB_RESET_DELAY_MS = 1200;
+
+    function flashOrb(lang){ //lang is either ne or en
+            const elOrb = document.getElementById('orb');
+            elOrb.className = `orb detected-${lang}`;
+
+            setTimeout(()=>{
+                if(isListening) elOrb.className= 'orb listening';
+            }, ORB_RESET_DELAY_MS)
+    }
+
+    function createRecogniser(){
+        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if(!SpeechRecognitionAPI){
+            console.log("Speech not supported")
+            return null;
+        }else{
+            console.log("Speech supported") 
+        }
+        recog = new SpeechRecognitionAPI();
+        recog.continuos = true;
+        recog.interimResults = true;
+        recog.lang = 'en-US';
+        recog.maxAlternatives = 3;
+
+        recog.onresult = (event) => {
+            for (let i =event.resultIndex; i<event.results.length;i++){
+                const result = event.results[i];
+                for(let a = 0; a <result.length;a++){
+                    const t = result[a].transcript;
+                    processTranscript(t);
+                }
+            }
+        }
+        recog.onerror = (err) => {
+            if(err.error === 'no-speech') return;
+            if(err.error === 'aborted') return;
+            setStatus(`Error:${err.error}`,'error');
+        };
+        recog.onend = () => {
+            if(!isListening) return;
+            setTimeout(()=>{
+                if(!isListening) return;
+                try {recog.start();} catch(_) {}
+            }, 100);
+        };
+        return recog;
+
+    }
+
+    const SHEKHAR_TOKENS   = ['shekhar','sekar','shekhaar','shekharr','shhekhar'];
+    const NAMASTE_TOKENS = ['namaste','namasthe','namashte','namastay'];
+    const HEY_TOKENS     = ['hey','hi','hello','hay','hei'];
+
+    const KEYWORDS = {
+        ne: ['namaste shekhar','namaste sekar','namasthe shekhar'],
+        en: ['hey shekhar','hi sekar','hello shekhar','hey shekhar']
+    };
+
+    function levenshtein(a,b){
+        if(Math.abs(a.length-b.length) > 6){
+            return 99;
+        }
+
+        const lenA = a.length, lenB = b.length;
+
+        const dp = [];
+        for(let i=0;i<= lenA;i++){
+            const row =[i];
+            for(let j=0;j<= lenB;j++){
+                row.push(0);
+            }
+            dp.push(row);
+        }
+
+        for(let j=0;j<= lenB; j++) dp[0][j] = j;
+
+        for(let i=1;i<= lenA;i++){
+            for(let j=1;j<=lenB;j++){
+                dp[i][j] = a[i-1] === b[j-1] ? 
+                dp[i-1][j-1] : 1 + Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+            }
+        }
+        return dp[lenA][lenB];
+
+    }
+
+    function fuzzyInList(word, list,maxDist){
+        for( token of list){
+            if(levenshtein(word,token) <=maxDist) return true;
+        }
+        return false;
+    }
+
+    function scoreTranscript(raw){
+        clean = raw.toLowerCase().replace(/[^a-z\s]/g,'').replace(/\s+/,' ').trim();
+        if(!clean) return {ne:0,en:0};
+        let ne_score = 0;
+        let en_score = 0;
+
+        ne_score = exactness(clean,KEYWORDS.ne);
+        en_score = exactness(clean,KEYWORDS.en);
+
+        for(word of clean){
+            has_shekhar = fuzzyInList(word,SHEKHAR_TOKENS,2);
+            has_namaste = fuzzyInList(word,NAMASTE_TOKENS,2);
+            has_hey = fuzzyInList(word,HEY_TOKENS,2);
+        }
+         
+        if (has_shekhar && has_namaste) ne_score = Math.max(ne_score,0.8)
+        if (has_shekhar && has_hey) en_score = Math.max(en_score,0.8)
+
+        return {ne: ne_score, en:en_score};
+
+
+    }
+
+    function processTranscript(t){
+        setStatus('Heard: '+t,'active');
+        transcript = scoreTranscript(t);
+        if(transcript.ne >= 0.7) {
+            setStatus('NEPALI DETECTED! active');
+            flashOrb('ne');
+        }
+        if(transcript.en >= 0.7){
+            setStatus('ENGLISH DETECTED! active');
+            flashOrb('en');
+        }
+    }
+
+
+
+
+    //setStatus('Microphone denied', 'error');          // red dot
+
+
+
+</script>
